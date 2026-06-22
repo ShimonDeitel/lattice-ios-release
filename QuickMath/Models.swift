@@ -1,36 +1,48 @@
-import Foundation
+import SwiftUI
 import SwiftData
 
-// MARK: - SwiftData models
+// MARK: - SwiftData Models
 
 @Model
-final class WaveEntry {
-    var id: UUID
-    var date: Date
-    var level: Int
-    var partOfDay: String
-    var tag: String?
+final class DailyThree {
+    @Attribute(.unique) var date: Date
+    var slots: [TaskSlot]
 
-    init(id: UUID = UUID(), date: Date = .now, level: Int, partOfDay: String = "day", tag: String? = nil) {
-        self.id = id
-        self.date = date
-        self.level = level
-        self.partOfDay = partOfDay
-        self.tag = tag
+    init(date: Date) {
+        self.date = Calendar.current.startOfDay(for: date)
+        self.slots = [
+            TaskSlot(order: 0),
+            TaskSlot(order: 1),
+            TaskSlot(order: 2)
+        ]
     }
+
+    var winCount: Int { slots.filter { $0.done }.count }
+    var isPerfect: Bool { winCount == 3 }
+    var hasAnyTitle: Bool { slots.contains { !$0.title.isEmpty } }
 }
 
 @Model
-final class TrendCache {
+final class TaskSlot {
     var id: UUID
-    var weekStart: Date
-    var average: Double
+    var title: String
+    var done: Bool
+    var order: Int
 
-    init(id: UUID = UUID(), weekStart: Date, average: Double) {
-        self.id = id
-        self.weekStart = weekStart
-        self.average = average
+    init(order: Int) {
+        self.id = UUID()
+        self.title = ""
+        self.done = false
+        self.order = order
     }
+}
+
+// MARK: - Streak (value type, computed on the fly)
+
+struct StreakInfo {
+    var current: Int
+    var best: Int
+    var lastPerfectDate: Date?
 }
 
 // MARK: - AppModel
@@ -40,9 +52,9 @@ final class AppModel: ObservableObject {
     let container: ModelContainer
     weak var store: Store?
 
-    @Published private(set) var recentEntries: [WaveEntry] = []
-    @Published private(set) var todayEntry: WaveEntry? = nil
-    @Published private(set) var allEntries: [WaveEntry] = []
+    @Published private(set) var today: DailyThree?
+    @Published private(set) var history: [DailyThree] = []
+    @Published private(set) var streak: StreakInfo = StreakInfo(current: 0, best: 0, lastPerfectDate: nil)
 
     init(container: ModelContainer) {
         self.container = container
@@ -50,79 +62,135 @@ final class AppModel: ObservableObject {
     }
 
     static func makeContainer() -> ModelContainer {
-        let schema = Schema([WaveEntry.self, TrendCache.self])
+        let schema = Schema([DailyThree.self, TaskSlot.self])
         do {
-            let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-            return try ModelContainer(for: schema, configurations: [config])
+            let cfg = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+            return try ModelContainer(for: schema, configurations: [cfg])
         } catch {
-            let fallback = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-            return try! ModelContainer(for: schema, configurations: [fallback])
+            let cfg = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+            return (try? ModelContainer(for: schema, configurations: [cfg]))!
         }
     }
 
     func reload() {
         let ctx = container.mainContext
-        let descriptor = FetchDescriptor<WaveEntry>(sortBy: [SortDescriptor(\.date, order: .reverse)])
-        let fetched = (try? ctx.fetch(descriptor)) ?? []
-        allEntries = fetched
-        recentEntries = Array(fetched.prefix(7))
-        todayEntry = fetched.first(where: { Calendar.current.isDateInToday($0.date) })
+        let todayStart = Calendar.current.startOfDay(for: Date())
+
+        // Fetch or create today's DailyThree
+        let todayPred = #Predicate<DailyThree> { $0.date == todayStart }
+        let todayFetch = FetchDescriptor<DailyThree>(predicate: todayPred)
+        if let existing = try? ctx.fetch(todayFetch), let first = existing.first {
+            today = first
+        } else {
+            let newDay = DailyThree(date: Date())
+            ctx.insert(newDay)
+            try? ctx.save()
+            today = newDay
+        }
+
+        // Fetch full history sorted descending
+        var descriptor = FetchDescriptor<DailyThree>(sortBy: [SortDescriptor(\.date, order: .reverse)])
+        descriptor.fetchLimit = 365
+        history = (try? ctx.fetch(descriptor)) ?? []
+
+        streak = computeStreak()
     }
 
     func refresh() { reload() }
 
-    // MARK: Log energy level
-    func logEnergy(level: Int, partOfDay: String = "day", tag: String? = nil) {
-        let ctx = container.mainContext
-        // Replace existing today entry if same partOfDay
-        if let existing = allEntries.first(where: {
-            Calendar.current.isDateInToday($0.date) && $0.partOfDay == partOfDay
-        }) {
-            existing.level = level
-            existing.tag = tag
-        } else {
-            let entry = WaveEntry(level: level, partOfDay: partOfDay, tag: tag)
-            ctx.insert(entry)
+    // MARK: - Task operations
+
+    func setTitle(_ title: String, slot: TaskSlot) {
+        slot.title = title
+        save()
+    }
+
+    func toggleDone(_ slot: TaskSlot) {
+        guard !slot.title.isEmpty else { return }
+        slot.done.toggle()
+        if slot.done { Haptics.success() } else { Haptics.tap() }
+        save()
+        streak = computeStreak()
+    }
+
+    func clearToday() {
+        guard let t = today else { return }
+        for slot in t.slots {
+            slot.title = ""
+            slot.done = false
         }
-        try? ctx.save()
-        reload()
+        save()
     }
 
-    // MARK: 7-day rolling average
-    var sevenDayAverage: Double {
-        let relevant = recentEntries.prefix(7)
-        guard !relevant.isEmpty else { return 0 }
-        return Double(relevant.map(\.level).reduce(0, +)) / Double(relevant.count)
+    // MARK: - History helpers
+
+    func winRate(days: Int) -> Double {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+        let recent = history.filter { $0.date >= cutoff && $0.hasAnyTitle }
+        guard !recent.isEmpty else { return 0 }
+        let perfectDays = recent.filter { $0.isPerfect }.count
+        return Double(perfectDays) / Double(recent.count)
     }
 
-    // MARK: Best time of day (pro)
-    var bestTimeOfDay: String {
-        let mornings = allEntries.filter { $0.partOfDay == "morning" }
-        let evenings = allEntries.filter { $0.partOfDay == "evening" }
-        let morningAvg = mornings.isEmpty ? 0.0 : Double(mornings.map(\.level).reduce(0, +)) / Double(mornings.count)
-        let eveningAvg = evenings.isEmpty ? 0.0 : Double(evenings.map(\.level).reduce(0, +)) / Double(evenings.count)
-        if morningAvg == 0 && eveningAvg == 0 { return "Not enough data" }
-        if morningAvg >= eveningAvg { return "Morning" }
-        return "Evening"
-    }
-
-    // MARK: Current streak
-    var currentStreak: Int {
-        var streak = 0
-        var checkDate = Calendar.current.startOfDay(for: .now)
-        let daySet = Set(allEntries.map { Calendar.current.startOfDay(for: $0.date) })
-        while daySet.contains(checkDate) {
-            streak += 1
-            checkDate = Calendar.current.date(byAdding: .day, value: -1, to: checkDate)!
-        }
-        return streak
-    }
+    // MARK: - Delete all
 
     func deleteAllData() {
         let ctx = container.mainContext
-        try? ctx.delete(model: WaveEntry.self)
-        try? ctx.delete(model: TrendCache.self)
+        for day in history { ctx.delete(day) }
         try? ctx.save()
+        today = nil
+        history = []
+        streak = StreakInfo(current: 0, best: 0, lastPerfectDate: nil)
         reload()
+    }
+
+    // MARK: - Private
+
+    private func save() {
+        try? container.mainContext.save()
+    }
+
+    private func computeStreak() -> StreakInfo {
+        let cal = Calendar.current
+        // Sort ascending for streak walk
+        let sorted = history.filter { $0.hasAnyTitle }.sorted { $0.date < $1.date }
+        var current = 0
+        var best = 0
+        var lastPerfect: Date?
+
+        var streak = 0
+        for (i, day) in sorted.enumerated() {
+            if day.isPerfect {
+                if i == 0 {
+                    streak = 1
+                } else {
+                    let prev = sorted[i - 1]
+                    let diff = cal.dateComponents([.day], from: prev.date, to: day.date).day ?? 99
+                    streak = (prev.isPerfect && diff == 1) ? streak + 1 : 1
+                }
+                lastPerfect = day.date
+                best = max(best, streak)
+            } else {
+                streak = 0
+            }
+        }
+
+        // Current streak: count back from today
+        let todayStart = cal.startOfDay(for: Date())
+        var cur = 0
+        var checkDate = todayStart
+        for day in sorted.reversed() {
+            let diff = cal.dateComponents([.day], from: day.date, to: checkDate).day ?? 99
+            if diff > 1 { break }
+            if day.isPerfect {
+                cur += 1
+                checkDate = day.date
+            } else {
+                break
+            }
+        }
+        current = cur
+
+        return StreakInfo(current: current, best: best, lastPerfectDate: lastPerfect)
     }
 }

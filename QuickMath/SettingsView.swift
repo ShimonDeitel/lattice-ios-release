@@ -10,80 +10,87 @@ struct SettingsView: View {
     @State private var showPaywall = false
     @State private var showDeleteConfirm = false
 
-    private var theme: Binding<AppTheme> {
-        Binding(
-            get: { AppTheme(rawValue: themeRaw) ?? .system },
-            set: { themeRaw = $0.rawValue }
-        )
+    private var theme: AppTheme {
+        get { AppTheme(rawValue: themeRaw) ?? .system }
+        nonmutating set { themeRaw = newValue.rawValue }
     }
 
     var body: some View {
         NavigationStack {
             ZStack {
                 QMBackground()
-
                 List {
                     // Pro section
-                    Section("Subscription") {
+                    Section("Threes Pro") {
                         if store.isPro {
-                            HStack {
-                                Text("Tideline Pro")
-                                Spacer()
-                                Text("Active")
-                                    .foregroundStyle(Color.qmCorrect)
-                                    .font(.subheadline.weight(.medium))
-                            }
-                            Link("Manage Subscription",
-                                 destination: URL(string: "https://apps.apple.com/account/subscriptions")!)
+                            Label("Pro Active", systemImage: "checkmark.seal.fill")
                                 .foregroundStyle(Color.qmAccent)
-                        } else {
-                            Button("Unlock Tideline Pro") {
-                                showPaywall = true
+                            if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
+                                Link(destination: url) {
+                                    Label("Manage Subscription", systemImage: "arrow.up.right")
+                                }
+                                .foregroundStyle(Color.qmAccent)
                             }
-                            .foregroundStyle(Color.qmAccent)
+                        } else {
+                            Button {
+                                showPaywall = true
+                            } label: {
+                                Label("Unlock Threes Pro", systemImage: "lock.open.fill")
+                                    .foregroundStyle(Color.qmAccent)
+                            }
+                            Button {
+                                Task { await store.restore() }
+                            } label: {
+                                Label("Restore Purchase", systemImage: "arrow.clockwise")
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-
-                        Button("Restore Purchase") {
-                            Task { await store.restore() }
-                        }
-                        .foregroundStyle(Color.qmAccent)
                     }
 
                     // Appearance
                     Section("Appearance") {
-                        Picker("Theme", selection: theme) {
+                        Picker("Theme", selection: $themeRaw) {
                             ForEach(AppTheme.allCases) { t in
-                                Text(t.label).tag(t)
+                                Text(t.label).tag(t.rawValue)
                             }
                         }
                         .pickerStyle(.segmented)
+                        .listRowBackground(Color.clear)
                     }
 
                     // Legal
-                    Section("Legal") {
-                        Link("Privacy Policy",
-                             destination: URL(string: "https://shimondeitel.github.io/tideline-site/privacy.html")!)
+                    Section("About") {
+                        if let url = URL(string: "https://shimondeitel.github.io/threes-site/privacy.html") {
+                            Link(destination: url) {
+                                Label("Privacy Policy", systemImage: "hand.raised")
+                            }
                             .foregroundStyle(Color.qmAccent)
-                        Link("Terms of Use",
-                             destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
+                        }
+                        if let url = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/") {
+                            Link(destination: url) {
+                                Label("Terms of Use", systemImage: "doc.text")
+                            }
                             .foregroundStyle(Color.qmAccent)
+                        }
                     }
 
-                    // Data
-                    Section("Data") {
-                        Button("Delete All Data") {
+                    // Danger zone
+                    Section {
+                        Button(role: .destructive) {
                             showDeleteConfirm = true
+                        } label: {
+                            Label("Delete All Data", systemImage: "trash")
                         }
-                        .foregroundStyle(Color.qmWrong)
                     }
                 }
-                .scrollContentBackground(.hidden)
+                .listStyle(.insetGrouped)
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
+                        .foregroundStyle(Color.qmAccent)
                 }
             }
             .sheet(isPresented: $showPaywall) {
@@ -91,16 +98,17 @@ struct SettingsView: View {
                     .environmentObject(store)
             }
             .confirmationDialog(
-                "Delete all Tideline data?",
+                "Delete all data?",
                 isPresented: $showDeleteConfirm,
                 titleVisibility: .visible
             ) {
                 Button("Delete All", role: .destructive) {
                     appModel.deleteAllData()
+                    dismiss()
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This removes all your logged energy entries and cannot be undone.")
+                Text("This will permanently erase your task history and streaks.")
             }
         }
     }

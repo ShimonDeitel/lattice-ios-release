@@ -4,113 +4,107 @@ struct PaywallView: View {
     @EnvironmentObject var store: Store
     @Environment(\.dismiss) private var dismiss
 
-    private let benefits = [
-        ("clock.arrow.circlepath", "Unlimited multi-month wave history and zoom"),
-        ("waveform.path.ecg", "Morning vs evening dual-wave comparison"),
-        ("lightbulb", "Best-time-of-day insights and gentle daily nudge")
+    private let benefits: [(icon: String, text: String)] = [
+        ("calendar", "Browsable history of every past day's three and win-rate insights"),
+        ("arrow.uturn.forward", "Carry-forward unfinished items and rollover suggestions"),
+        ("bell.badge", "Morning prompt and evening review reminders")
     ]
 
     var body: some View {
         NavigationStack {
             ZStack {
                 QMBackground()
-
                 ScrollView {
                     VStack(spacing: 28) {
+
                         // Icon + title
                         VStack(spacing: 12) {
-                            Image(systemName: "waveform.path.ecg")
-                                .font(.system(size: 56, weight: .thin))
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.system(size: 56))
                                 .foregroundStyle(Color.qmAccent)
 
-                            Text("Tideline Pro")
-                                .font(.largeTitle.weight(.bold))
+                            Text("Threes Pro")
+                                .font(.title.weight(.bold))
 
-                            Text("$0.99 / month. Auto-renews until you cancel.")
+                            Text("\(store.displayPrice) / month. Auto-renews until you cancel.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
                         }
-                        .padding(.top, 16)
+                        .padding(.top)
 
                         // Benefits
-                        VStack(spacing: 0) {
-                            ForEach(Array(benefits.enumerated()), id: \.offset) { idx, benefit in
-                                HStack(spacing: 14) {
-                                    Image(systemName: benefit.0)
+                        VStack(alignment: .leading, spacing: 16) {
+                            ForEach(benefits, id: \.icon) { benefit in
+                                HStack(alignment: .top, spacing: 14) {
+                                    Image(systemName: benefit.icon)
                                         .foregroundStyle(Color.qmAccent)
+                                        .font(.title3)
                                         .frame(width: 28)
-                                    Text(benefit.1)
-                                        .font(.subheadline)
-                                    Spacer()
-                                }
-                                .padding(.vertical, 14)
-                                .padding(.horizontal, 16)
-
-                                if idx < benefits.count - 1 {
-                                    Divider().padding(.leading, 58)
+                                    Text(benefit.text)
+                                        .font(.body)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
                         }
-                        .background(Color.qmCard, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                        .padding(.horizontal, 16)
+                        .qmCard()
+                        .padding(.horizontal)
 
-                        // Unlock button
-                        Button {
-                            Task {
-                                await store.purchase()
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
+                        // CTA
+                        VStack(spacing: 12) {
+                            Button {
+                                Task { await store.purchase() }
+                            } label: {
                                 if store.purchaseInFlight {
                                     ProgressView()
-                                        .tint(.white)
+                                        .frame(maxWidth: .infinity)
+                                } else {
+                                    Text("Unlock Threes Pro")
+                                        .frame(maxWidth: .infinity)
                                 }
-                                Text("Unlock for \(store.displayPrice)/month")
-                                    .frame(maxWidth: .infinity)
                             }
-                        }
-                        .prominentButton()
-                        .disabled(store.purchaseInFlight)
-                        .padding(.horizontal, 16)
+                            .prominentButton()
+                            .padding(.horizontal)
+                            .disabled(store.purchaseInFlight)
 
-                        // Restore
-                        Button("Restore Purchase") {
-                            Task { await store.restore() }
+                            Button("Restore Purchase") {
+                                Task { await store.restore() }
+                            }
+                            .font(.subheadline)
+                            .foregroundStyle(Color.qmAccent)
                         }
-                        .font(.subheadline)
-                        .foregroundStyle(Color.qmAccent)
 
-                        // Legal
+                        // Legal disclosure
                         VStack(spacing: 8) {
-                            Text("Subscription automatically renews each month at \(store.displayPrice) unless cancelled at least 24 hours before the renewal date. Manage or cancel anytime in your Apple Account subscriptions.")
+                            Text("Threes Pro is \(store.displayPrice)/month. Subscription automatically renews each month unless cancelled at least 24 hours before the renewal date. You can manage or cancel your subscription at any time in your Apple ID settings.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
 
                             HStack(spacing: 16) {
-                                Link("Terms of Use", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
-                                    .font(.caption)
-                                    .foregroundStyle(Color.qmAccent)
-                                Link("Privacy Policy", destination: URL(string: "https://shimondeitel.github.io/tideline-site/privacy.html")!)
-                                    .font(.caption)
-                                    .foregroundStyle(Color.qmAccent)
+                                Link("Terms of Use",
+                                     destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
+                                Link("Privacy Policy",
+                                     destination: URL(string: "https://shimondeitel.github.io/threes-site/privacy.html")!)
                             }
+                            .font(.caption)
+                            .foregroundStyle(Color.qmAccent)
                         }
-                        .padding(.horizontal, 24)
-
-                        Spacer(minLength: 16)
+                        .padding(.horizontal)
+                        .padding(.bottom)
                     }
                 }
             }
+            .navigationTitle("Threes Pro")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("Close") { dismiss() }
+                        .foregroundStyle(Color.qmAccent)
                 }
             }
-            .onChange(of: store.isPro) { _, newValue in
-                if newValue { dismiss() }
+            .onChange(of: store.isPro) { _, newVal in
+                if newVal { dismiss() }
             }
         }
     }

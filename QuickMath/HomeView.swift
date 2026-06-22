@@ -7,81 +7,61 @@ struct HomeView: View {
     @EnvironmentObject var store: Store
 
     @State private var showSettings = false
-    @State private var showPaywall = false
-    @State private var showInsights = false
+    @State private var showPro = false
 
     var body: some View {
         NavigationStack {
             ZStack {
                 QMBackground()
-
                 ScrollView {
-                    VStack(spacing: 24) {
-                        // Header
-                        VStack(spacing: 4) {
-                            Text("Tideline")
-                                .font(.largeTitle.weight(.bold))
-                            Text("Ride your daily mood wave")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.top, 8)
-
-                        // Today's entry card
+                    VStack(spacing: 20) {
+                        // Today's card
                         GridView()
-                            .padding(.horizontal, 16)
+                            .environmentObject(appModel)
+                            .environmentObject(store)
 
                         // Stats row
                         HStack(spacing: 12) {
+                            MetricTile(value: "\(appModel.streak.current)", label: "Streak")
+                            MetricTile(value: "\(appModel.streak.best)", label: "Best")
                             MetricTile(
-                                value: appModel.todayEntry.map { "\($0.level)" } ?? "-",
+                                value: appModel.today.map { "\($0.winCount)/3" } ?? "–",
                                 label: "Today"
                             )
-                            MetricTile(
-                                value: String(format: "%.1f", appModel.sevenDayAverage),
-                                label: "7-day avg"
-                            )
-                            MetricTile(
-                                value: "\(appModel.currentStreak)",
-                                label: "Streak"
-                            )
                         }
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal)
 
-                        // Pro tile
+                        // Pro history tile
                         Button {
-                            if store.isPro {
-                                showInsights = true
-                            } else {
-                                showPaywall = true
-                            }
+                            Haptics.tap()
+                            showPro = true
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(store.isPro ? "Tideline Pro" : "Unlock Insights")
+                                    Text("History & Insights")
                                         .font(.headline)
-                                    Text(store.isPro ? "History, dual-wave & trends" : "Multi-month history + dual-wave")
+                                    Text("See every past day's wins")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                Image(systemName: store.isPro ? "waveform.path.ecg" : "lock.fill")
+                                Image(systemName: store.isPro ? "chevron.right" : "lock.fill")
                                     .foregroundStyle(Color.qmAccent)
-                                    .font(.title3)
                             }
                             .qmCard()
+                            .padding(.horizontal)
                         }
                         .buttonStyle(.plain)
-                        .padding(.horizontal, 16)
-
-                        Spacer(minLength: 32)
                     }
+                    .padding(.vertical)
                 }
             }
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Threes")
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button {
+                        Haptics.tap()
                         showSettings = true
                     } label: {
                         Image(systemName: "gearshape")
@@ -94,28 +74,25 @@ struct HomeView: View {
                     .environmentObject(store)
                     .environmentObject(appModel)
             }
-            .sheet(isPresented: $showPaywall) {
-                PaywallView()
-                    .environmentObject(store)
-            }
-            .sheet(isPresented: $showInsights) {
-                InsightsView()
-                    .environmentObject(appModel)
-                    .environmentObject(store)
-            }
-            .onAppear {
-                handleForceScreen()
+            .sheet(isPresented: $showPro) {
+                if store.isPro {
+                    InsightsView()
+                        .environmentObject(appModel)
+                        .environmentObject(store)
+                } else {
+                    PaywallView()
+                        .environmentObject(store)
+                }
             }
         }
-    }
-
-    private func handleForceScreen() {
-        guard let screen = forceScreen else { return }
-        switch screen {
-        case "paywall": showPaywall = true
-        case "insights": showInsights = true
-        case "settings": showSettings = true
-        default: break
+        .onAppear {
+            if let screen = forceScreen {
+                switch screen {
+                case "pro": showPro = true
+                case "settings": showSettings = true
+                default: break
+                }
+            }
         }
     }
 }

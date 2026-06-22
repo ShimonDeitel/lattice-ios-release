@@ -1,137 +1,153 @@
 import SwiftUI
-import Charts
 
+/// The primary entry/action screen: shows today's three priority slots.
 struct GridView: View {
     @EnvironmentObject var appModel: AppModel
+    @EnvironmentObject var store: Store
 
-    @State private var sliderValue: Double = 5
-    @State private var logged = false
+    @FocusState private var focusedSlot: Int?
 
-    private var chartEntries: [WaveEntry] {
-        Array(appModel.recentEntries.reversed())
+    private var slots: [TaskSlot] {
+        (appModel.today?.slots ?? []).sorted { $0.order < $1.order }
     }
 
     var body: some View {
-        VStack(spacing: 20) {
-            // Wave chart
-            if chartEntries.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "waveform")
-                        .font(.system(size: 44))
-                        .foregroundStyle(Color.qmAccent.opacity(0.4))
-                    Text("Log your first energy level below")
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(dateLabel)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
+                    Text("Your three.")
+                        .font(.title2.weight(.bold))
                 }
-                .frame(height: 140)
-                .frame(maxWidth: .infinity)
-            } else {
-                Chart {
-                    ForEach(Array(chartEntries.enumerated()), id: \.offset) { idx, entry in
-                        AreaMark(
-                            x: .value("Day", idx),
-                            yStart: .value("Base", 0),
-                            yEnd: .value("Level", entry.level)
-                        )
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color.qmAccent.opacity(0.25), Color.qmAccent.opacity(0.05)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .interpolationMethod(.catmullRom)
-
-                        LineMark(
-                            x: .value("Day", idx),
-                            y: .value("Level", entry.level)
-                        )
-                        .foregroundStyle(Color.qmAccent)
-                        .lineStyle(StrokeStyle(lineWidth: 2.5))
-                        .interpolationMethod(.catmullRom)
-
-                        PointMark(
-                            x: .value("Day", idx),
-                            y: .value("Level", entry.level)
-                        )
-                        .foregroundStyle(Color.qmAccent)
-                        .symbolSize(36)
-                    }
+                Spacer()
+                // Day result badge
+                if let today = appModel.today, today.hasAnyTitle {
+                    dayBadge(today: today)
                 }
-                .chartYScale(domain: 0...10)
-                .chartXAxis(.hidden)
-                .chartYAxis {
-                    AxisMarks(values: [0, 5, 10]) { value in
-                        AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4]))
-                            .foregroundStyle(Color.qmHair)
-                        AxisValueLabel {
-                            if let v = value.as(Int.self) {
-                                Text("\(v)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-                .frame(height: 140)
             }
 
-            // Divider
             Divider()
 
-            // Log energy section
-            VStack(spacing: 12) {
-                HStack {
-                    Text("Energy level")
-                        .font(.headline)
-                    Spacer()
-                    Text("\(Int(sliderValue.rounded()))")
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(Color.qmAccent)
-                        .monospacedDigit()
-                        .frame(width: 32)
-                }
-
-                Slider(value: $sliderValue, in: 0...10, step: 1)
-                    .tint(Color.qmAccent)
-                    .onChange(of: sliderValue) { _, _ in
-                        Haptics.tap()
-                        logged = false
+            // Three task slots
+            ForEach(Array(slots.enumerated()), id: \.element.id) { index, slot in
+                SlotRow(
+                    slot: slot,
+                    number: index + 1,
+                    isFocused: focusedSlot == index,
+                    onTitleChange: { newTitle in
+                        appModel.setTitle(newTitle, slot: slot)
+                    },
+                    onToggle: {
+                        appModel.toggleDone(slot)
                     }
+                )
+                .focused($focusedSlot, equals: index)
 
+                if index < 2 {
+                    Divider().padding(.leading, 44)
+                }
+            }
+
+            // Dismiss keyboard hint
+            if focusedSlot != nil {
                 HStack {
-                    Text("Low")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                     Spacer()
-                    Text("High")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Button {
-                    appModel.logEnergy(level: Int(sliderValue.rounded()))
-                    Haptics.success()
-                    logged = true
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: logged ? "checkmark" : "waveform.path")
-                        Text(logged ? "Logged" : "Log Today's Energy")
+                    Button("Done") {
+                        focusedSlot = nil
                     }
-                    .frame(maxWidth: .infinity)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.qmAccent)
                 }
-                .prominentButton()
-                .disabled(logged)
-                .animation(.easeInOut(duration: 0.2), value: logged)
             }
         }
         .qmCard()
-        .onAppear {
-            if let today = appModel.todayEntry {
-                sliderValue = Double(today.level)
-                logged = true
+        .padding(.horizontal)
+    }
+
+    // MARK: - Helpers
+
+    private var dateLabel: String {
+        let fmt = DateFormatter()
+        fmt.dateStyle = .full
+        fmt.timeStyle = .none
+        return fmt.string(from: Date())
+    }
+
+    @ViewBuilder
+    private func dayBadge(today: DailyThree) -> some View {
+        let wins = today.winCount
+        Group {
+            if today.isPerfect {
+                Label("Won the day!", systemImage: "checkmark.seal.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.qmCorrect)
+            } else if wins > 0 {
+                Text("\(wins) of 3")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Get started")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color.qmCard2, in: Capsule())
+    }
+}
+
+// MARK: - SlotRow
+
+private struct SlotRow: View {
+    let slot: TaskSlot
+    let number: Int
+    let isFocused: Bool
+    let onTitleChange: (String) -> Void
+    let onToggle: () -> Void
+
+    @State private var localTitle: String = ""
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Number + check button
+            Button(action: onToggle) {
+                ZStack {
+                    Circle()
+                        .stroke(slot.done ? Color.qmAccent : Color.qmHair, lineWidth: 2)
+                        .frame(width: 32, height: 32)
+                    if slot.done {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(Color.qmAccent)
+                    } else {
+                        Text("\(number)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(slot.title.isEmpty)
+
+            // Title field
+            TextField("Priority \(number)", text: $localTitle, axis: .vertical)
+                .font(.body)
+                .lineLimit(1...3)
+                .strikethrough(slot.done, color: .secondary)
+                .foregroundStyle(slot.done ? .secondary : .primary)
+                .onAppear { localTitle = slot.title }
+                .onChange(of: localTitle) { _, newVal in
+                    onTitleChange(newVal)
+                }
+                .onChange(of: slot.title) { _, newVal in
+                    if newVal != localTitle { localTitle = newVal }
+                }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 }
