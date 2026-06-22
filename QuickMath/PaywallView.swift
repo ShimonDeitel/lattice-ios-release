@@ -3,108 +3,115 @@ import SwiftUI
 struct PaywallView: View {
     @EnvironmentObject var store: Store
     @Environment(\.dismiss) private var dismiss
-    @State private var working = false
-    @State private var restoreMessage: String?
 
-    private let benefits: [(String, String, String)] = [
-        ("calendar", "Daily grid archive", "Replay every past day's logic grid, all the way back."),
-        ("square.grid.3x3.fill", "Bigger grids", "Step up to tougher 5x5 and 6x6 deduction puzzles."),
-        ("brain.head.profile", "An expert grid daily", "A second, harder hand-made grid every single day."),
-        ("lightbulb.fill", "Hints & themes", "Nudge tokens when you're stuck, plus board themes.")
+    private let benefits = [
+        ("clock.arrow.circlepath", "Unlimited multi-month wave history and zoom"),
+        ("waveform.path.ecg", "Morning vs evening dual-wave comparison"),
+        ("lightbulb", "Best-time-of-day insights and gentle daily nudge")
     ]
 
     var body: some View {
-        ZStack {
-            QMBackground()
-            ScrollView {
-                VStack(spacing: 22) {
-                    VStack(spacing: 8) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 40, weight: .semibold))
-                            .foregroundStyle(Color.qmAccent)
-                        Text("Lattice Pro").font(.largeTitle.weight(.heavy))
-                        Text("$0.99 / month. Auto-renews until you cancel.")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(.top, 28)
+        NavigationStack {
+            ZStack {
+                QMBackground()
 
-                    VStack(alignment: .leading, spacing: 14) {
-                        ForEach(benefits, id: \.0) { item in
-                            HStack(alignment: .top, spacing: 14) {
-                                Image(systemName: item.0)
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(Color.qmAccent)
-                                    .frame(width: 28)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.1).font(.headline)
-                                    Text(item.2).font(.subheadline).foregroundStyle(.secondary)
+                ScrollView {
+                    VStack(spacing: 28) {
+                        // Icon + title
+                        VStack(spacing: 12) {
+                            Image(systemName: "waveform.path.ecg")
+                                .font(.system(size: 56, weight: .thin))
+                                .foregroundStyle(Color.qmAccent)
+
+                            Text("Tideline Pro")
+                                .font(.largeTitle.weight(.bold))
+
+                            Text("$0.99 / month. Auto-renews until you cancel.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(.top, 16)
+
+                        // Benefits
+                        VStack(spacing: 0) {
+                            ForEach(Array(benefits.enumerated()), id: \.offset) { idx, benefit in
+                                HStack(spacing: 14) {
+                                    Image(systemName: benefit.0)
+                                        .foregroundStyle(Color.qmAccent)
+                                        .frame(width: 28)
+                                    Text(benefit.1)
+                                        .font(.subheadline)
+                                    Spacer()
                                 }
-                                Spacer(minLength: 0)
+                                .padding(.vertical, 14)
+                                .padding(.horizontal, 16)
+
+                                if idx < benefits.count - 1 {
+                                    Divider().padding(.leading, 58)
+                                }
                             }
                         }
-                    }
-                    .qmCard()
-                    .padding(.horizontal)
+                        .background(Color.qmCard, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .padding(.horizontal, 16)
 
-                    VStack(spacing: 12) {
-                        Button { Task { await buy() } } label: {
-                            HStack {
-                                if working { ProgressView().tint(.white) }
-                                Text(working ? "Unlocking…" : "Unlock Lattice Pro · \(store.displayPrice)")
-                                    .font(.headline)
+                        // Unlock button
+                        Button {
+                            Task {
+                                await store.purchase()
                             }
-                            .frame(maxWidth: .infinity).padding(.vertical, 6)
+                        } label: {
+                            HStack(spacing: 8) {
+                                if store.purchaseInFlight {
+                                    ProgressView()
+                                        .tint(.white)
+                                }
+                                Text("Unlock for \(store.displayPrice)/month")
+                                    .frame(maxWidth: .infinity)
+                            }
                         }
                         .prominentButton()
-                        .accessibilityIdentifier("paywall-unlock")
-                        .disabled(working)
+                        .disabled(store.purchaseInFlight)
+                        .padding(.horizontal, 16)
 
-                        Button("Restore Purchase") { Task { await restore() } }
-                            .font(.subheadline).tint(.secondary)
-
-                        if let restoreMessage {
-                            Text(restoreMessage).font(.footnote).foregroundStyle(.secondary)
+                        // Restore
+                        Button("Restore Purchase") {
+                            Task { await store.restore() }
                         }
+                        .font(.subheadline)
+                        .foregroundStyle(Color.qmAccent)
 
-                        Text("Lattice Pro is a $0.99/month subscription that renews automatically unless canceled at least 24 hours before the period ends. Payment is charged to your Apple Account; manage or cancel anytime in Settings.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center).padding(.top, 4)
+                        // Legal
+                        VStack(spacing: 8) {
+                            Text("Subscription automatically renews each month at \(store.displayPrice) unless cancelled at least 24 hours before the renewal date. Manage or cancel anytime in your Apple Account subscriptions.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
 
-                        HStack(spacing: 16) {
-                            Link("Terms of Use", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
-                            Link("Privacy Policy", destination: URL(string: "https://shimondeitel.github.io/lattice-site/privacy.html")!)
+                            HStack(spacing: 16) {
+                                Link("Terms of Use", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
+                                    .font(.caption)
+                                    .foregroundStyle(Color.qmAccent)
+                                Link("Privacy Policy", destination: URL(string: "https://shimondeitel.github.io/tideline-site/privacy.html")!)
+                                    .font(.caption)
+                                    .foregroundStyle(Color.qmAccent)
+                            }
                         }
-                        .font(.footnote).tint(Color.qmAccent)
+                        .padding(.horizontal, 24)
 
-                        Text("Lattice never tracks you. Your progress stays on your device.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center).padding(.top, 4)
+                        Spacer(minLength: 16)
                     }
-                    .padding(.horizontal).padding(.bottom, 30)
                 }
             }
-        }
-        .overlay(alignment: .topTrailing) {
-            Button { dismiss() } label: {
-                Image(systemName: "xmark.circle.fill").font(.title2)
-                    .foregroundStyle(.secondary).padding()
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Close") { dismiss() }
+                }
             }
-            .accessibilityIdentifier("paywall-close")
+            .onChange(of: store.isPro) { _, newValue in
+                if newValue { dismiss() }
+            }
         }
-        .onChange(of: store.isPro) { _, newValue in if newValue { dismiss() } }
-    }
-
-    private func buy() async {
-        working = true
-        let ok = await store.purchase()
-        working = false
-        if ok { Haptics.success(); dismiss() }
-    }
-
-    private func restore() async {
-        await store.restore()
-        if store.isPro { Haptics.success(); dismiss() }
-        else { restoreMessage = "No previous purchase found on this Apple ID." }
     }
 }
